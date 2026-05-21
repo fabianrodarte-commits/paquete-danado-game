@@ -1,5 +1,31 @@
 import { useState, useEffect, useRef } from "react";
 
+const SUPABASE_URL = "https://jsoqjkgrxtxzbxpfwmqu.supabase.co";
+const SUPABASE_KEY = "sb_publishable_eMFXBmCcW927tmc2q8-2KA_QDMQ2NBF";
+
+const headers = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_KEY,
+  "Authorization": `Bearer ${SUPABASE_KEY}`,
+};
+
+async function guardarResultado(datos) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/resultados`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(datos),
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function obtenerResultados() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/resultados?select=*&order=puntaje.desc,fecha.asc`, { headers });
+    return await res.json();
+  } catch { return []; }
+}
+
 const questions = [
   { q: "Encuentras un paquete con la caja rota pero el producto adentro está completamente bien. ¿Qué haces?", options: ["Lo clasificas como dañado y lo envías a devolución", "Reparas el embalaje con cinta Meli o caja nueva y lo reincorporas al flujo", "Lo dejas a un lado para que lo revise el Team Leader", "Lo descartas porque el embalaje está roto"], answer: 1, explanation: "Si el producto está intacto, debes reempacar y registrar el reacondicionamiento. ¡Nunca clasificar como dañado solo por la caja!" },
   { q: "¿Cuál es la primera acción que debes hacer con un paquete dañado antes de cualquier otra cosa?", options: ["Tomar una foto y subirla", "Reportarlo al Team Leader inmediatamente", "Intentar siempre la reparación o reacondicionamiento antes de declararlo dañado", "Registrarlo directamente como dañado en el sistema"], answer: 2, explanation: "Siempre se debe intentar la reparación ANTES de declarar un paquete como dañado, independientemente del origen." },
@@ -21,26 +47,8 @@ const questions = [
 const TOTAL_TIME = 15;
 const COLORS = ["#FFD700","#FF6B6B","#4ECDC4","#45B7D1","#96CEB4","#DDA0DD","#F7DC6F","#82E0AA"];
 const medalEmoji = ["🥇","🥈","🥉"];
-const STORAGE_KEY = "lb:";
 
 function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
-
-// Simple localStorage-based leaderboard
-const storage = {
-  async save(name, entry) {
-    try {
-      const all = JSON.parse(localStorage.getItem("leaderboard") || "[]");
-      all.push(entry);
-      localStorage.setItem("leaderboard", JSON.stringify(all));
-    } catch {}
-  },
-  async load() {
-    try {
-      const all = JSON.parse(localStorage.getItem("leaderboard") || "[]");
-      return all.sort((a, b) => b.score - a.score || a.timeTaken - b.timeTaken);
-    } catch { return []; }
-  }
-};
 
 export default function App() {
   const [screen, setScreen] = useState("home");
@@ -54,11 +62,14 @@ export default function App() {
   const [showResult, setShowResult] = useState(false);
   const [answers, setAnswers] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [loadingLB, setLoadingLB] = useState(false);
   const timerRef = useRef(null);
 
   const fetchLeaderboard = async () => {
-    const data = await storage.load();
-    setLeaderboard(data);
+    setLoadingLB(true);
+    const data = await obtenerResultados();
+    setLeaderboard(Array.isArray(data) ? data : []);
+    setLoadingLB(false);
   };
 
   const startGame = () => {
@@ -102,15 +113,13 @@ export default function App() {
     setTimeout(async () => {
       if (currentQ + 1 >= shuffledQs.length) {
         const correctCount = newAnswers.filter(a => a.correct).length;
-        const entry = {
-          name: playerName,
-          score: newScore,
-          correct: correctCount,
+        await guardarResultado({
+          nombre: playerName,
+          puntaje: newScore,
+          correctas: correctCount,
           total: 10,
-          date: new Date().toLocaleDateString("es-MX"),
-          timeTaken: Date.now()
-        };
-        await storage.save(playerName, entry);
+          porcentaje: Math.round((correctCount / 10) * 100),
+        });
         setScreen("done");
       } else {
         setCurrentQ(q => q + 1);
@@ -238,7 +247,9 @@ export default function App() {
       <div style={{ fontSize:48, marginBottom:4 }}>🏆</div>
       <h2 style={{ color:"#FFD700", fontSize:22, fontWeight:900, margin:"0 0 4px" }}>Tabla de Resultados</h2>
       <p style={{ color:"#aaa", fontSize:12, marginBottom:20 }}>Todos los jugadores que han completado el juego</p>
-      {leaderboard.length === 0 ? (
+      {loadingLB ? (
+        <p style={{ color:"#aaa" }}>Cargando resultados...</p>
+      ) : leaderboard.length === 0 ? (
         <div style={{ background:"rgba(255,255,255,0.06)", borderRadius:16, padding:24, textAlign:"center", width:"100%", maxWidth:400 }}>
           <p style={{ color:"#aaa", fontSize:14 }}>Aún no hay resultados registrados.</p>
           <p style={{ color:"#666", fontSize:12 }}>¡Sé el primero en jugar!</p>
@@ -246,19 +257,19 @@ export default function App() {
       ) : (
         <div style={{ width:"100%", maxWidth:420 }}>
           {leaderboard.map((entry, i) => (
-            <div key={i} style={{ background: i===0 ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.05)", border: i===0 ? "2px solid #FFD700" : "2px solid rgba(255,255,255,0.08)", borderRadius:14, padding:"12px 18px", marginBottom:10, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div key={entry.id} style={{ background: i===0 ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.05)", border: i===0 ? "2px solid #FFD700" : "2px solid rgba(255,255,255,0.08)", borderRadius:14, padding:"12px 18px", marginBottom:10, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <span style={{ fontSize:22 }}>{medalEmoji[i] || `${i+1}.`}</span>
-                <div style={{ width:36, height:36, borderRadius:"50%", background:COLORS[entry.name.charCodeAt(0)%COLORS.length], display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:16, color:"#000", flexShrink:0 }}>
-                  {entry.name[0].toUpperCase()}
+                <div style={{ width:36, height:36, borderRadius:"50%", background:COLORS[entry.nombre.charCodeAt(0)%COLORS.length], display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:16, color:"#000", flexShrink:0 }}>
+                  {entry.nombre[0].toUpperCase()}
                 </div>
                 <div>
-                  <div style={{ color: i===0 ? "#FFD700" : "#fff", fontWeight:700, fontSize:15 }}>{entry.name}</div>
-                  <div style={{ color:"#666", fontSize:11 }}>{entry.correct}/10 correctas · {entry.date}</div>
+                  <div style={{ color: i===0 ? "#FFD700" : "#fff", fontWeight:700, fontSize:15 }}>{entry.nombre}</div>
+                  <div style={{ color:"#666", fontSize:11 }}>{entry.correctas}/10 correctas · {entry.porcentaje}%</div>
                 </div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ color: i===0 ? "#FFD700" : "#4ECDC4", fontWeight:900, fontSize:20 }}>{entry.score}</div>
+                <div style={{ color: i===0 ? "#FFD700" : "#4ECDC4", fontWeight:900, fontSize:20 }}>{entry.puntaje}</div>
                 <div style={{ color:"#666", fontSize:11 }}>pts</div>
               </div>
             </div>
